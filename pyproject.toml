@@ -13,5 +13,7 @@ dependencies = [
     "langchain-tavily>=0.2.11",
     "langchain[openai]>=0.3.27",
     "langgraph>=0.6.6",
+    "markdownify>=1.2.0",
     "pyyaml>=6.0.2",
+    "readabilipy>=0.3.0",
 ]

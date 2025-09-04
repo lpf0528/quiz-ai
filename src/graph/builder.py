@@ -6,7 +6,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 
 from src.graph.nodes import coordinator_node, planner_node, human_feedback_node, research_team_node, \
-    background_investigation_node
+    background_investigation_node, researcher_node
 from src.graph.types import State
 from src.prompts.planner_model import StepType
 
@@ -46,14 +46,14 @@ def _build_base_graph():
     builder.add_node("coordinator", coordinator_node)
     builder.add_node("background_investigator", background_investigation_node)
     builder.add_node("planner", planner_node)
-    # builder.add_node("human_feedback", human_feedback_node)
-    # builder.add_node("research_team", research_team_node)
-    # builder.add_node("researcher", researcher_node)
+    builder.add_node("human_feedback", human_feedback_node)
+    builder.add_node("research_team", research_team_node)
+    builder.add_node("researcher", researcher_node)
     builder.add_edge("background_investigator", "planner")
-    # builder.add_conditional_edges(
-    #     "research_team",
-    #     continue_to_running_research_team,
-    #     ["planner", "researcher", "coder"],
-    # )
+    builder.add_conditional_edges(
+        "research_team",
+        continue_to_running_research_team,
+        ["planner", "researcher", "coder"],
+    )
     builder.add_edge("coordinator", END)
     return builder

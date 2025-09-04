@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from typing import Annotated, Literal
 
 from langchain_core.messages import HumanMessage, AIMessage
@@ -7,6 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.types import Command, interrupt
 
+from src.agents import create_agent
 from src.config.agents import AGENT_LLM_MAP
 from src.config.configuration import Configuration
 from src.config.tools import SELECTED_SEARCH_ENGINE, SearchEngine
@@ -15,6 +17,8 @@ from src.graph.types import State
 from src.llms.llm import get_llm_by_type
 from src.prompts.planner_model import Plan, StepType
 from src.prompts.template import apply_prompt_template
+from src.tools.crawl import crawl_tool
+from src.tools.retriever import get_retriever_tool
 from src.tools.search import LoggedTavilySearch, get_web_search_tool
 from src.utils.json_utils import repair_json_output
 
@@ -40,10 +44,146 @@ def research_team_node(state: State):
     pass
 
 
-def researcher_node(state: State):
+async def _execute_agent_step(
+        state: State, agent, agent_name: str
+) -> Command[Literal["research_team"]]:
+    current_plan = state.get('current_plan')
+    plan_title = current_plan.title
+    observations = state.get("observations", [])
+
+    current_step = None
+    completed_steps = []
+    for step in current_plan.steps:
+        if not step.execution_res:
+            current_step = step
+            break
+        else:
+            completed_steps.append(step)
+
+    if not current_step:
+        return Command(goto='research_team')
+
+    completed_steps_info = ""
+    if completed_steps:
+        completed_steps_info = "# Completed Research Steps\n\n"
+        for i, step in enumerate(completed_steps):
+            completed_steps_info += f"## Completed Step {i + 1}: {step.title}\n\n"
+            completed_steps_info += f"<finding>\n{step.execution_res}\n</finding>\n\n"
+
+    agent_input = {
+        'message': [
+            HumanMessage(
+                content=f"# Research Topic\n\n{plan_title}\n\n{completed_steps_info}# Current Step\n\n## Title\n\n{current_step.title}\n\n## Description\n\n{current_step.description}\n\n## Locale\n\n{state.get('locale', 'en-US')}"
+            )
+        ]
+    }
+    # 为研究代理添加引用提醒。
+    if agent_name == 'researcher':
+        if state.get('resources'):
+            resources_info = "**用户提到了以下资源文件:**\n\n"
+            for resource in state.get("resources"):
+                resources_info += f"- {resource.title} ({resource.description})\n"
+
+            agent_input["messages"].append(
+                HumanMessage(
+                    content=resources_info
+                            + "\n\n"
+                            + "您必须使用**local_search_tool**从资源文件中检索信息。",
+                )
+            )
+    # 递归限制
+    default_recursion_limit = 25
+    try:
+        env_value_str = os.getenv("AGENT_RECURSION_LIMIT", str(default_recursion_limit))
+        parsed_limit = int(env_value_str)
+        if parsed_limit > 0:
+            recursion_limit = parsed_limit
+            logger.info(f"Recursion limit set to: {recursion_limit}")
+        else:
+            logger.warning(
+                f"AGENT_RECURSION_LIMIT value '{env_value_str}' (parsed as {parsed_limit}) is not positive. "
+                f"Using default value {default_recursion_limit}."
+            )
+            recursion_limit = default_recursion_limit
+    except ValueError:
+        raw_env_value = os.getenv("AGENT_RECURSION_LIMIT")
+        logger.warning(
+            f"Invalid AGENT_RECURSION_LIMIT value: '{raw_env_value}'. "
+            f"Using default value {default_recursion_limit}."
+        )
+        recursion_limit = default_recursion_limit
+
+    logger.info(f"Agent input: {agent_input}")
+    result = await agent.ainvoke(
+        input=agent_input, config={"recursion_limit": recursion_limit}
+    )
+    response_content = result["messages"][-1].content
+    logger.debug(f"{agent_name.capitalize()} full response: {response_content}")
+
+    current_step.execution_res = response_content
+    logger.info(f"Step '{current_step.title}' execution completed by {agent_name}")
+
+    return Command(
+        update={
+            "messages": [
+                HumanMessage(
+                    content=response_content,
+                    name=agent_name,
+                )
+            ],
+            # 观察结果
+            "observations": observations + [response_content],
+        },
+        goto="research_team",
+    )
+
+
+async def _setup_and_execute_agent_step(state: State, config: RunnableConfig, agent_type: str, default_tools: list):
+    """用于设置具有适当工具的代理并执行步骤的辅助函数。
+
+    这个函数负责处理 researcher_node 和 coder_node 的通用逻辑：
+    1. 根据代理类型配置 MCP 服务器和工具
+    2. 创建一个带有适当工具的代理或使用默认代理
+    3. 在当前步骤执行代理
+
+    参数：
+        state: 当前状态
+        config: 可运行的配置
+        agent_type: 代理类型（“researcher” 或 “coder”）
+        default_tools: 要添加到代理的默认工具
+
+    返回：
+        更新状态并进入 research_team 的命令
+    """
+    configurable = Configuration.from_runnable_config(config)
+    mcp_servers = {}
+    enabled_tools = []
+    if configurable.mcp_settings:
+        # TODO
+        pass
+
+    agent = create_agent(agent_type, agent_type, default_tools, agent_type)
+    return await _execute_agent_step(state, agent, agent_type)
+
+
+async def researcher_node(state: State, config: RunnableConfig):
     """研究节点：使用网络搜索引擎、爬虫甚至 MCP 服务等工具进行网络搜索和信息收集。"""
     logger.info("研究员节点 开始.")
-    pass
+    configurable = Configuration.from_runnable_config(config)
+    # 搜索工具
+    tools = [get_web_search_tool(configurable.max_search_results), crawl_tool]
+    # 检索工具
+    retriever_tool = get_retriever_tool(state.get("resources", []))
+    if retriever_tool:
+        tools.insert(0, retriever_tool)
+
+    logger.info(f" 研究员节点 工具: {tools}")
+    return await _setup_and_execute_agent_step(
+        state,
+        config,
+        "researcher",
+        tools,
+    )
 
 
 # def reporter_node(state: State, config: RunnableConfig):
