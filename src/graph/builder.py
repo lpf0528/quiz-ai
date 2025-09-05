@@ -1,5 +1,6 @@
 import logging
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
 
 from src.graph.nodes import coordinator_node, planner_node, human_feedback_node, research_team_node, \
@@ -56,3 +57,10 @@ def _build_base_graph():
     )
     builder.add_edge("reporter", END)
     return builder
+
+
+def build_graph_with_memory():
+    memory = MemorySaver()
+    builder = _build_base_graph()
+
+    return builder.compile(checkpointer=memory)

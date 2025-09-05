@@ -1,3 +1,4 @@
+import logging
 import os
 from dataclasses import dataclass, fields
 from typing import Any, Optional
@@ -5,6 +6,8 @@ from typing import Any, Optional
 from langchain_core.runnables import RunnableConfig
 
 from src.config.report_style import ReportStyle
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(kw_only=True)
@@ -31,3 +34,54 @@ class Configuration:
             if f.init  # 仅为那些在类实例化时需要初始化的字段获取值（即，init=True 的字段）。
         }
         return cls(**{k: v for k, v in values.items() if v is not None})
+
+
+_TRUTHY = {"1", "true", "yes", "y", "on"}
+
+
+def get_bool_env(name: str, default: bool = False) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return default
+    return str(val).strip().lower() in _TRUTHY
+
+
+def get_str_env(name: str, default: str = "") -> str:
+    val = os.getenv(name)
+    return default if val is None else str(val).strip()
+
+
+def get_int_env(name: str, default: int = 0) -> int:
+    val = os.getenv(name)
+    if val is None:
+        return default
+    try:
+        return int(val.strip())
+    except ValueError:
+        logger.warning(
+            f"Invalid integer value for {name}: {val}. Using default {default}."
+        )
+        return default
+
+
+def get_recursion_limit(default: int = 25) -> int:
+    """Get the recursion limit from environment variable or use default.
+
+    Args:
+        default: Default recursion limit if environment variable is not set or invalid
+
+    Returns:
+        int: The recursion limit to use
+    """
+    env_value_str = get_str_env("AGENT_RECURSION_LIMIT", str(default))
+    parsed_limit = get_int_env("AGENT_RECURSION_LIMIT", default)
+
+    if parsed_limit > 0:
+        logger.info(f"Recursion limit set to: {parsed_limit}")
+        return parsed_limit
+    else:
+        logger.warning(
+            f"AGENT_RECURSION_LIMIT value '{env_value_str}' (parsed as {parsed_limit}) is not positive. "
+            f"Using default value {default}."
+        )
+        return default
