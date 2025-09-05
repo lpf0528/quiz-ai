@@ -18,6 +18,7 @@ from src.llms.llm import get_llm_by_type
 from src.prompts.planner_model import Plan, StepType
 from src.prompts.template import apply_prompt_template
 from src.tools.crawl import crawl_tool
+from src.tools.python_repl import python_repl_tool
 from src.tools.retriever import get_retriever_tool
 from src.tools.search import LoggedTavilySearch, get_web_search_tool
 from src.utils.json_utils import repair_json_output
@@ -186,51 +187,76 @@ async def researcher_node(state: State, config: RunnableConfig):
     )
 
 
-# def reporter_node(state: State, config: RunnableConfig):
-#     """
-#     报告员：研究输出的最终阶段处理器
-#         汇总研究团队的发现
-#         处理和组织收集的信息
-#         生成全面的研究报告
-#     """
-#     logger.info("报告节点 开始.")
-#     configurable = Configuration.from_runnable_config(config)
-#     current_plan = state.get('current_plan', '')
-#
-#     _input = {
-#         'messages': [
-#             HumanMessage(
-#                 f"# Research Requirements\n\n## Task\n\n{current_plan.title}\n\n## Description\n\n{current_plan.thought}")
-#         ],
-#         "locale": state.get("locale", "en-US"),
-#     }
-#     invoke_messages = apply_prompt_template('reporter', _input, configurable)
-#     # 观察
-#     observations = state.get('observations', [])
-#     """
-#     重要提示：根据提示中的格式编写报告。记得包括：
-#     1. 关键点 - 用项目符号列出最重要的发现
-#     2. 概述 - 简要介绍主题
-#     3. 详细分析 - 按逻辑分段组织
-#     4. 调查说明（可选） - 适用于更全面的报告
-#     5. 主要参考文献 - 在最后列出所有引用
-#
-#     对于引用，不要在正文中添加内嵌引用。相反，请在最后的“主要参考文献”部分列出所有引用，格式为：`- [来源标题](URL)`。引用之间空一行以提高可读性。
-#
-#     优先使用Markdown表格进行数据展示和比较。每当展示比较数据、统计数据、功能或选项时，使用表格。结构化表格要有清晰的标题和对齐的列。示例表格格式：
-#
-#     | 功能     | 描述        | 优点   | 缺点   |
-#     |----------|-------------|--------|--------|
-#     | 功能 1   | 描述 1      | 优点 1 | 缺点 1 |
-#     | 功能 2   | 描述 2      | 优点 2 | 缺点 2 |
-#     """
-#
-#     invoke_messages.append(HumanMessage(
-#         content="IMPORTANT: Structure your report according to the format in the prompt. Remember to include:\n\n1. Key Points - A bulleted list of the most important findings\n2. Overview - A brief introduction to the topic\n3. Detailed Analysis - Organized into logical sections\n4. Survey Note (optional) - For more comprehensive reports\n5. Key Citations - List all references at the end\n\nFor citations, DO NOT include inline citations in the text. Instead, place all citations in the 'Key Citations' section at the end using the format: `- [Source Title](URL)`. Include an empty line between each citation for better readability.\n\nPRIORITIZE USING MARKDOWN TABLES for data presentation and comparison. Use tables whenever presenting comparative data, statistics, features, or options. Structure tables with clear headers and aligned columns. Example table format:\n\n| Feature | Description | Pros | Cons |\n|---------|-------------|------|------|\n| Feature 1 | Description 1 | Pros 1 | Cons 1 |\n| Feature 2 | Description 2 | Pros 2 | Cons 2 |",
-#         name="system"
-#     ))
-#     for observation in observations:
-#         invoke_messages.append(HumanMessage(content=observation, name="observation"))
+async def coder_node(
+        state: State, config: RunnableConfig
+) -> Command[Literal["research_team"]]:
+    """Coder node that do code analysis."""
+    logger.info("Coder node is coding.")
+    return await _setup_and_execute_agent_step(
+        state,
+        config,
+        "coder",
+        [python_repl_tool],
+    )
+
+
+def reporter_node(state: State, config: RunnableConfig):
+    """
+    报告员：研究输出的最终阶段处理器
+        汇总研究团队的发现
+        处理和组织收集的信息
+        生成全面的研究报告
+    """
+    logger.info("报告节点 开始.")
+    configurable = Configuration.from_runnable_config(config)
+    current_plan = state.get('current_plan', '')
+
+    _input = {
+        'messages': [
+            HumanMessage(
+                f"# Research Requirements\n\n## Task\n\n{current_plan.title}\n\n## Description\n\n{current_plan.thought}")
+        ],
+        "locale": state.get("locale", "en-US"),
+    }
+    invoke_messages = apply_prompt_template('reporter', _input, configurable)
+    # 观察
+    observations = state.get('observations', [])
+    """
+    重要提示：根据提示中的格式编写报告。记得包括：
+    1. 关键点 - 用项目符号列出最重要的发现
+    2. 概述 - 简要介绍主题
+    3. 详细分析 - 按逻辑分段组织
+    4. 调查说明（可选） - 适用于更全面的报告
+    5. 主要参考文献 - 在最后列出所有引用
+
+    对于引用，不要在正文中添加内嵌引用。相反，请在最后的“主要参考文献”部分列出所有引用，格式为：`- [来源标题](URL)`。引用之间空一行以提高可读性。
+
+    优先使用Markdown表格进行数据展示和比较。每当展示比较数据、统计数据、功能或选项时，使用表格。结构化表格要有清晰的标题和对齐的列。示例表格格式：
+
+    | 功能     | 描述        | 优点   | 缺点   |
+    |----------|-------------|--------|--------|
+    | 功能 1   | 描述 1      | 优点 1 | 缺点 1 |
+    | 功能 2   | 描述 2      | 优点 2 | 缺点 2 |
+    """
+
+    invoke_messages.append(HumanMessage(
+        content="IMPORTANT: Structure your report according to the format in the prompt. Remember to include:\n\n1. Key Points - A bulleted list of the most important findings\n2. Overview - A brief introduction to the topic\n3. Detailed Analysis - Organized into logical sections\n4. Survey Note (optional) - For more comprehensive reports\n5. Key Citations - List all references at the end\n\nFor citations, DO NOT include inline citations in the text. Instead, place all citations in the 'Key Citations' section at the end using the format: `- [Source Title](URL)`. Include an empty line between each citation for better readability.\n\nPRIORITIZE USING MARKDOWN TABLES for data presentation and comparison. Use tables whenever presenting comparative data, statistics, features, or options. Structure tables with clear headers and aligned columns. Example table format:\n\n| Feature | Description | Pros | Cons |\n|---------|-------------|------|------|\n| Feature 1 | Description 1 | Pros 1 | Cons 1 |\n| Feature 2 | Description 2 | Pros 2 | Cons 2 |",
+        name="system"
+    ))
+    for observation in observations:
+        invoke_messages.append(
+            HumanMessage(
+                content=f"Below are some observations for the research task:\n\n{observation}",
+                name="observation",
+            )
+        )
+
+    logger.debug(f"Current invoke messages: {invoke_messages}")
+    response = get_llm_by_type(AGENT_LLM_MAP["reporter"]).invoke(invoke_messages)
+    response_content = response.content
+    logger.info(f"reporter response: {response_content}")
+
+    return {"final_report": response_content}
 
 
 def human_feedback_node(state: State, config: RunnableConfig):
